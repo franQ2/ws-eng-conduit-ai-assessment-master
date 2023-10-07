@@ -3,6 +3,8 @@ import { EntityManager, QueryOrder, wrap } from '@mikro-orm/core';
 import { InjectRepository } from '@mikro-orm/nestjs';
 import { EntityRepository } from '@mikro-orm/mysql';
 
+import { Tag } from '../tag/tag.entity';
+
 import { User } from '../user/user.entity';
 import { Article } from './article.entity';
 import { IArticleRO, IArticlesRO, ICommentsRO } from './article.interface';
@@ -13,6 +15,8 @@ import { CreateArticleDto, CreateCommentDto } from './dto';
 export class ArticleService {
   constructor(
     private readonly em: EntityManager,
+    @InjectRepository(Tag) // Inject the Tag entity repository
+    private readonly tagRepository: EntityRepository<Tag>,
     @InjectRepository(Article)
     private readonly articleRepository: EntityRepository<Article>,
     @InjectRepository(Comment)
@@ -148,13 +152,32 @@ export class ArticleService {
     return { comments: article!.comments.getItems() };
   }
 
+  async updateTags(tags: string[]) {
+    for (const tag of tags) {
+      let existingTag = await this.tagRepository.findOne({ tag });
+
+      if (!existingTag) {
+        existingTag = new Tag();
+        existingTag.tag = tag;
+        await this.em.persistAndFlush(existingTag);
+      }
+    }
+  }
+
   async create(userId: number, dto: CreateArticleDto) {
     const user = await this.userRepository.findOne(
       { id: userId },
       { populate: ['followers', 'favorites', 'articles'] },
     );
+
+    // Split the comma-separated string into an array of strings and trim each tag
+    const tagList = dto.tagList.split(',').map((tag) => tag.trim());
+
+    // Update tags in the tagRepository
+    await this.updateTags(tagList);
+
     const article = new Article(user!, dto.title, dto.description, dto.body);
-    article.tagList.push(...dto.tagList);
+    article.tagList.push(...tagList); // Push the tags into the article
     user?.articles.add(article);
     await this.em.flush();
 
